@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Top GitHub Repositories" />
+    <meta property="og:description" content="Discover the most popular open-source projects by GitHub stars" />
+    <meta name="description" content="Discover the most popular open-source projects by GitHub stars" />
+
+    <title>Top GitHub Repositories</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1><a href="/" id="appTitle">Top GitHub Repositories</a></h1>
+      <p class="subtitle">
+        Tracking <strong id="totalRepos">0</strong> repositories - <a href="https://github.com/idefasoft/git-leaderboard">Source code</a>
+      </p>
+      <div class="panel">
+        <div class="controls">
+          <div class="control-group grow">
+            <label for="q">Search</label>
+            <input id="q" type="text" placeholder="owner/repo or keywords" />
+          </div>
+          <div class="control-group">
+            <label for="language">Language</label>
+            <input id="language" list="languagesList" placeholder="e.g. Python" />
+            <datalist id="languagesList"></datalist>
+          </div>
+          <div class="control-group">
+            <label for="topic">Topic</label>
+            <input id="topic" list="topicsList" placeholder="e.g. linux" />
+            <datalist id="topicsList"></datalist>
+          </div>
+          <div class="control-group">
+            <label for="metric">Sort by</label>
+            <select id="metric">
+              <option value="stars">Stars</option>
+              <option value="forks">Forks</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label>&nbsp;</label>
+            <button id="apply" class="btn-action">Apply</button>
+          </div>
+          <div class="control-group">
+            <label>&nbsp;</label>
+            <div class="view-toggle">
+              <button id="viewTable" class="active" title="Table view">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 6H20M4 12H20M4 18H20" />
+                </svg>
+              </button>
+              <button id="viewCards" title="Card view">
+                <svg width="16" height="16" viewBox="0 0 1024 1024" fill="currentColor">
+                  <path d="M160 448a32 32 0 0 1-32-32V160.064a32 32 0 0 1 32-32h256a32 32 0 0 1 32 32V416a32 32 0 0 1-32 32H160zm448 0a32 32 0 0 1-32-32V160.064a32 32 0 0 1 32-32h255.936a32 32 0 0 1 32 32V416a32 32 0 0 1-32 32H608zM160 896a32 32 0 0 1-32-32V608a32 32 0 0 1 32-32h256a32 32 0 0 1 32 32v256a32 32 0 0 1-32 32H160zm448 0a32 32 0 0 1-32-32V608a32 32 0 0 1 32-32h255.936a32 32 0 0 1 32 32v256a32 32 0 0 1-32 32H608z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div id="content"></div>
+        <div class="pager">
+          <div class="pager-info" id="pageInfo">…</div>
+          <div class="pager-controls">
+            <button id="prev" disabled>← Prev</button>
+            <input type="number" id="pageInput" min="1" value="1" />
+            <button id="goPage" class="btn-go" title="Go to page">
+              <svg width="14" height="14" viewBox="-1 -2 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12.6111L8.92308 17.5L20 6.5" />
+              </svg>
+            </button>
+            <span id="pageMax">/ 1</span>
+            <button id="next" disabled>Next →</button>
+          </div>
+        </div>
+        <div class="error" id="err" style="display: none"></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="modalOverlay">
+      <div class="modal" id="modal">
+        <div class="modal-header">
+          <div class="modal-title" id="modalTitle">…</div>
+          <button class="modal-close" id="modalClose">×</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
