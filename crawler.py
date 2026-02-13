@@ -30,6 +30,7 @@ query($queryString: String!, $cursor: String) {
     }
     nodes {
       ... on Repository {
+        databaseId
         nameWithOwner
         stargazerCount
         forkCount

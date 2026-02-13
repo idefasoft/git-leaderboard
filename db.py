@@ -111,7 +111,7 @@ class RepoDB:
         self._lang_cache: Dict[str, int] = {}
         self._topic_cache: Dict[str, int] = {}
 
-        self._processed_names: set[str] = set()
+        self._processed_repo_ids: set[int] = set()
 
     def close(self) -> None:
         self.conn.close()
@@ -269,38 +269,39 @@ class RepoDB:
 
         fresh_nodes: List[Dict[str, Any]] = []
         for n in nodes:
-            name = n.get("nameWithOwner")
-            if not isinstance(name, str) or not name:
+            repo_id = n.get("databaseId")
+            if not isinstance(repo_id, int) or repo_id <= 0:
                 continue
-            if name in self._processed_names:
+            if repo_id in self._processed_repo_ids:
                 continue
-            self._processed_names.add(name)
+            self._processed_repo_ids.add(repo_id)
             fresh_nodes.append(n)
 
         if not fresh_nodes:
             return
 
-        repo_rows: List[Tuple[str, Optional[int], Optional[str], Optional[str]]] = []
-        names: List[str] = []
+        repo_rows: List[Tuple[int, str, Optional[int], Optional[str], Optional[str]]] = []
+        repo_ids: List[int] = []
+
         for n in fresh_nodes:
+            repo_id = int(n["databaseId"])
             name = n["nameWithOwner"]
-            names.append(name)
-            repo_rows.append((name, iso_to_unix(n.get("createdAt")), n.get("description"), n.get("homepageUrl")))
+            repo_ids.append(repo_id)
+            repo_rows.append((repo_id, name, iso_to_unix(n.get("createdAt")), n.get("description"), n.get("homepageUrl")))
 
         with self.conn:
             self.conn.executemany(
                 """
-                INSERT INTO repo(name_with_owner, created_at, description, homepage_url)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(name_with_owner) DO UPDATE SET
-                    description  = excluded.description,
-                    homepage_url = excluded.homepage_url
+                INSERT INTO repo(id, name_with_owner, created_at, description, homepage_url)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name_with_owner = excluded.name_with_owner,
+                    description     = excluded.description,
+                    homepage_url    = excluded.homepage_url
                 """,
                 repo_rows,
             )
 
-        name_to_id = self._fetch_repo_ids(names)
-        repo_ids = [name_to_id[n] for n in names if n in name_to_id]
         existing_latest = self._fetch_latest_metrics(repo_ids)
 
         latest_rows: List[Tuple[int, int, int, int, int, int, Optional[int], Optional[int], Optional[int], int, Optional[int]]] = []
@@ -311,9 +312,7 @@ class RepoDB:
         topic_pairs_to_insert: List[Tuple[int, int]] = []
 
         for n in fresh_nodes:
-            repo_id = name_to_id.get(n["nameWithOwner"])
-            if repo_id is None:
-                continue
+            repo_id = int(n["databaseId"])
 
             stars = int(n.get("stargazerCount", 0))
             forks = int(n.get("forkCount", 0))
