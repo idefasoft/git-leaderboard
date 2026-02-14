@@ -46,12 +46,12 @@ if not IS_PROD:
 
     @app.get("/")
     def home() -> FileResponse:
-        return FileResponse("static/index.html")
+        return FileResponse("index.html")
 
 
 @app.get("/api/leaderboard")
 def leaderboard(
-    metric: str = Query("stars", description="stars|forks|watchers|diskUsage"),
+    metric: str = Query("stars", description="stars|forks|watchers|diskUsage|trending24h|trending3d|trending7d|trending30d"),
     page: int = Query(1, ge=1),
     q: Optional[str] = Query(None, description="Search in name/description"),
     in_description: bool = Query(True),

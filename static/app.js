@@ -51,6 +51,13 @@ function fmtDate(iso) {
   return iso ? String(iso).slice(0, 10) : "";
 }
 
+function fmtDelta(n) {
+  if (n === null || n === undefined) return "–";
+  const v = Number(n);
+  const s = v.toLocaleString();
+  return v < 0 ? `-${s}` : v > 0 ? `+${s}` : s;
+}
+
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -151,6 +158,7 @@ function sortItems(key) {
 
 function renderTable() {
   const state = getState();
+  const isTrending = String(state.metric || "").startsWith("trending");
   const startRank = (state.page - 1) * 100;
   const { highlight } = getUIParams();
 
@@ -159,6 +167,7 @@ function renderTable() {
       <th>#</th>
       <th data-sort="n">Repository</th>
       <th data-sort="s">Stars</th>
+      ${isTrending ? `<th data-sort="ns">New stars</th>` : ``}
       <th data-sort="f">Forks</th>
       <th data-sort="l">Language</th>
     </tr></thead><tbody>`;
@@ -172,6 +181,7 @@ function renderTable() {
         ${archivedBadge(it)}
       </td>
       <td class="mono">${fmtInt(it.s)}</td>
+      ${isTrending ? `<td class="mono">${fmtDelta(it.ns)}</td>` : ``}
       <td class="mono">${fmtInt(it.f)}</td>
       <td>${escapeHtml(it.l || "")}</td>
     </tr>`;
@@ -182,6 +192,8 @@ function renderTable() {
 }
 
 function renderCards() {
+  const state = getState();
+  const isTrending = String(state.metric || "").startsWith("trending");
   let html = '<div class="cards">';
   const { highlight } = getUIParams();
 
@@ -196,7 +208,7 @@ function renderCards() {
         ${archivedBadge(it)}
       </div>
         <div class="card-stats">
-        <span><svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor" style="vertical-align:-2px"><path d="M923.2 429.6H608l-97.6-304-97.6 304H97.6l256 185.6L256 917.6l256-187.2 256 187.2-100.8-302.4z"/></svg> ${fmtInt(it.s)}</span>
+        <span><svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor" style="vertical-align:-2px"><path d="M923.2 429.6H608l-97.6-304-97.6 304H97.6l256 185.6L256 917.6l256-187.2 256 187.2-100.8-302.4z"/></svg> ${fmtInt(it.s)}${isTrending ? ` (${fmtDelta(it.ns)})` : ``}</span>
         <span><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px"><path d="M7 5C7 3.89543 7.89543 3 9 3C10.1046 3 11 3.89543 11 5C11 5.74028 10.5978 6.38663 10 6.73244V14.0396H11.7915C12.8961 14.0396 13.7915 13.1441 13.7915 12.0396V10.7838C13.1823 10.4411 12.7708 9.78837 12.7708 9.03955C12.7708 7.93498 13.6662 7.03955 14.7708 7.03955C15.8753 7.03955 16.7708 7.93498 16.7708 9.03955C16.7708 9.77123 16.3778 10.4111 15.7915 10.7598V12.0396C15.7915 14.2487 14.0006 16.0396 11.7915 16.0396H10V17.2676C10.5978 17.6134 11 18.2597 11 19C11 20.1046 10.1046 21 9 21C7.89543 21 7 20.1046 7 19C7 18.2597 7.4022 17.6134 8 17.2676V6.73244C7.4022 6.38663 7 5.74028 7 5Z"/></svg> ${fmtInt(it.f)}</span>
         </div>
       </div>

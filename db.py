@@ -26,7 +26,7 @@ def row_to_obj(row: sqlite3.Row) -> Dict[str, Any]:
     topics = [] if topics_concat is None else str(topics_concat).split("\x1f")
     topics = [t for t in topics if t]
 
-    return {
+    res = {
         "n": row["nameWithOwner"],
         "g": None if row["globalRank"] is None else int(row["globalRank"]),
         "s": int(row["stargazerCount"]),
@@ -43,9 +43,12 @@ def row_to_obj(row: sqlite3.Row) -> Dict[str, Any]:
         "t": topics,
         # "x": unix_to_iso(row["fetchedAtUnix"]),
     }
+    if "newStars" in row.keys() and row["newStars"]:
+        res["ns"] = int(row["newStars"])
+    return res
 
 
-def select_latest_base_sql(include_global_rank: bool = True) -> str:
+def select_latest_base_sql(include_global_rank: bool = True, extra_select: str = "") -> str:
     rank_select = "gr.globalRank     AS globalRank," if include_global_rank else "NULL            AS globalRank,"
     rank_join = (
         """
@@ -65,6 +68,7 @@ def select_latest_base_sql(include_global_rank: bool = True) -> str:
             r.name_with_owner AS nameWithOwner,
             {rank_select}
             rl.stars          AS stargazerCount,
+            {extra_select}
             rl.forks          AS forkCount,
             rl.watchers       AS watchersCount,
             rl.disk_usage     AS diskUsage,
@@ -263,6 +267,16 @@ class RepoDB:
             for row in self.conn.execute(q, tuple(chunk)).fetchall():
                 out[int(row["repo_id"])] = row
         return out
+
+    def _base_run_id_for_window(self, window_seconds: int) -> int:
+        row = self.conn.execute("SELECT MAX(fetched_at) AS mx FROM fetch_run").fetchone()
+        if row is None or row["mx"] is None:
+            return 0
+        now_ts = int(row["mx"])
+        cutoff = now_ts - int(window_seconds)
+
+        row2 = self.conn.execute("SELECT MAX(id) AS base_id FROM fetch_run WHERE fetched_at <= ?", (cutoff,)).fetchone()
+        return 0 if row2 is None or row2["base_id"] is None else int(row2["base_id"])
 
     def upsert_from_github_nodes(self, nodes: List[Dict[str, Any]]) -> None:
         run_id = self.begin_run()
@@ -507,6 +521,53 @@ class RepoDB:
         row = self.conn.execute(sql, tuple(params)).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def trending_leaderboard(
+        self,
+        window_seconds: int,
+        page: int = 1,
+        q: Optional[str] = None,
+        in_description: bool = True,
+        language: Optional[str] = None,
+        topic: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        page_size = 100
+        base_run_id = self._base_run_id_for_window(window_seconds)
+
+        where_clause, params = self._prepare_filter_conditions(q, in_description, language, topic)
+        offset = (int(page) - 1) * page_size
+
+        extra_select = """
+                MAX(
+                    rl.stars - COALESCE((
+                        SELECT h.stars
+                        FROM repo_metrics_hist h
+                        WHERE h.repo_id = rl.repo_id
+                        AND h.start_run_id <= ?
+                        AND h.end_run_id   >= ?
+                        ORDER BY h.end_run_id ASC
+                        LIMIT 1
+                    ), rl.stars),
+                    0
+                ) AS newStars,
+        """
+
+        sql = (
+            select_latest_base_sql(False, extra_select=extra_select)
+            + where_clause
+            + """
+            GROUP BY rl.repo_id
+            ORDER BY newStars DESC, rl.stars DESC, r.name_with_owner ASC
+            LIMIT ? OFFSET ?
+            """
+        )
+
+        all_params: List[Any] = [base_run_id, base_run_id]
+        all_params.extend(params)
+        all_params.extend([page_size, int(offset)])
+
+        rows = self.conn.execute(sql, tuple(all_params)).fetchall()
+        return [row_to_obj(r) for r in rows]
+
     def leaderboard(
         self,
         metric: str = "stars",
@@ -517,6 +578,23 @@ class RepoDB:
         topic: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         page_size = 100
+
+        trending_map = {
+            "trending24h": 24 * 3600,
+            "trending3d": 3 * 24 * 3600,
+            "trending7d": 7 * 24 * 3600,
+            "trending30d": 30 * 24 * 3600,
+        }
+        if metric in trending_map:
+            return self.trending_leaderboard(
+                window_seconds=trending_map[metric],
+                page=page,
+                q=q,
+                in_description=in_description,
+                language=language,
+                topic=topic,
+            )
+
         metric_map = {
             "stars": "rl.stars",
             "stargazerCount": "rl.stars",
