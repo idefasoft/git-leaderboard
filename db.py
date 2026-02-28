@@ -304,6 +304,31 @@ class RepoDB:
             repo_rows.append((repo_id, name, iso_to_unix(n.get("createdAt")), n.get("description"), n.get("homepageUrl")))
 
         with self.conn:
+            conflict_params = [(row[1], row[0]) for row in repo_rows]
+
+            self.conn.executemany(
+                """
+                DELETE FROM repo_latest
+                WHERE repo_id IN (SELECT id FROM repo WHERE name_with_owner = ? AND id != ?)
+                """,
+                conflict_params,
+            )
+            self.conn.executemany(
+                """
+                DELETE FROM repo_topic_latest
+                WHERE repo_id IN (SELECT id FROM repo WHERE name_with_owner = ? AND id != ?)
+                """,
+                conflict_params,
+            )
+            self.conn.executemany(
+                """
+                UPDATE repo
+                SET name_with_owner = name_with_owner || '-renamed-' || id
+                WHERE name_with_owner = ? AND id != ?
+                """,
+                conflict_params,
+            )
+
             self.conn.executemany(
                 """
                 INSERT INTO repo(id, name_with_owner, created_at, description, homepage_url)
