@@ -5,17 +5,14 @@ import shutil
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Callable, List
+from typing import List
 
 import requests
 
 from db import RepoDB
 
 TOKEN = "replace this"
-MIN_STARS = 1_000
-DB_PATH = "github_repos.db"
-LIVE_DB_PATH = "repos.db"
-PM2_APP_NAME = "git_leaderboard"
+
 GRAPHQL_QUERY = """
 query($queryString: String!, $cursor: String) {
   rateLimit {
@@ -127,75 +124,104 @@ class GithubGraphQL:
         raise Exception("Max retries exceeded.")
 
 
-def deploy_site(crawled_db_path: str):
-    log("Preparing deployment...")
+class Crawler:
+    def __init__(
+        self,
+        token: str,
+        min_stars: int = 1_000,
+        db_path: str = "github_repos.db",
+        live_db_path: str = "repos.db",
+        pm2_app_name: str = "git_leaderboard",
+    ):
+        self.token = token
+        self.min_stars = min_stars
+        self.db_path = db_path
+        self.live_db_path = live_db_path
+        self.pm2_app_name = pm2_app_name
 
-    db = RepoDB(crawled_db_path)
+        self.gh = GithubGraphQL(self.token)
+        self.db = RepoDB(self.db_path)
 
-    row = db.conn.execute("SELECT COUNT(*) AS cnt FROM repo_latest").fetchone()
-    total_repos = int(row["cnt"]) if row else 0
-    formatted_total = "{:,}".format(total_repos)
+        self.current_min_stars = self.min_stars
+        self.total_fetched = 0
+        # used by upsert logic to avoid duplicate processing in a run
+        self._processed_repo_ids: set[int] = set()
 
-    lang_rows = db.conn.execute("SELECT name FROM language ORDER BY name LIMIT 5000").fetchall()
-    languages = [str(r["name"]) for r in lang_rows]
+    def log(self, *args, **kwargs):
+        """Simple timestamped logger"""
+        timestamp = datetime.now().strftime("[%d:%H:%S]")
+        print(timestamp, *args, **kwargs)
 
-    topic_sql = """
-        SELECT t.name, COUNT(rtl.repo_id) AS cnt
-        FROM topic t
-        JOIN repo_topic_latest rtl ON rtl.topic_id = t.id
-        GROUP BY t.id
-        ORDER BY cnt DESC
-        LIMIT 500
-    """
-    topic_rows = db.conn.execute(topic_sql).fetchall()
-    topics = [{"name": str(r["name"]), "count": int(r["cnt"])} for r in topic_rows]
+    def deploy_site(self):
+        self.log("Preparing deployment...")
 
-    db.close()
+        # reopen a fresh connection so we don't interfere with crawling
+        db = RepoDB(self.db_path)
 
-    log("Stopping PM2 service...")
-    try:
-        subprocess.run(["pm2", "stop", PM2_APP_NAME], check=False, stdout=subprocess.DEVNULL)
-    except Exception as e:
-        log(f"Warning: PM2 stop failed (might not be running): {e}")
+        row = db.conn.execute("SELECT COUNT(*) AS cnt FROM repo_latest").fetchone()
+        total_repos = int(row["cnt"]) if row else 0
+        formatted_total = "{:,}".format(total_repos)
 
-    log("Swapping Database...")
-    if os.path.exists(crawled_db_path):
-        if os.path.exists(LIVE_DB_PATH):
-            os.remove(LIVE_DB_PATH)
-        shutil.copy2(crawled_db_path, LIVE_DB_PATH)
+        lang_rows = db.conn.execute("SELECT name FROM language ORDER BY name LIMIT 5000").fetchall()
+        languages = [str(r["name"]) for r in lang_rows]
 
-    index_path = "index.html"
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+        topic_sql = """
+            SELECT t.name, COUNT(rtl.repo_id) AS cnt
+            FROM topic t
+            JOIN repo_topic_latest rtl ON rtl.topic_id = t.id
+            GROUP BY t.id
+            ORDER BY cnt DESC
+            LIMIT 500
+        """
+        topic_rows = db.conn.execute(topic_sql).fetchall()
+        topics = [{"name": str(r["name"]), "count": int(r["cnt"])} for r in topic_rows]
 
-        html_content = re.sub(r'(id="totalRepos"[^>]*>).*?(</\w+>)', f"\\g<1>{formatted_total}\\g<2>", html_content)
+        db.close()
 
-        with open(index_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        log(f"Updated {index_path} with {formatted_total} repos.")
+        self.log("Stopping PM2 service...")
+        try:
+            subprocess.run(["pm2", "stop", self.pm2_app_name], check=False, stdout=subprocess.DEVNULL)
+        except Exception as e:
+            self.log(f"Warning: PM2 stop failed (might not be running): {e}")
 
-    app_js_path = "static/app.js"
-    if os.path.exists(app_js_path):
-        with open(app_js_path, "r", encoding="utf-8") as f:
-            js_content = f.read()
+        self.log("Swapping Database...")
+        if os.path.exists(self.db_path):
+            if os.path.exists(self.live_db_path):
+                os.remove(self.live_db_path)
+            shutil.copy2(self.db_path, self.live_db_path)
 
-        static_data = {"languages": languages, "topics": topics}
-        injection_code1 = f"const STATIC_DATA = {json.dumps(static_data)};"
+        index_path = "index.html"
+        if os.path.exists(index_path):
+            with open(index_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
 
-        if "const STATIC_DATA =" in js_content:
-            js_content = re.sub(r"const STATIC_DATA = \{.*?\};", injection_code1, js_content, flags=re.DOTALL)
+            html_content = re.sub(r'(id="totalRepos"[^>]*>).*?(</\w+>)', f"\\g<1>{formatted_total}\\g<2>", html_content)
 
-        with open(app_js_path, "w", encoding="utf-8") as f:
-            f.write(js_content)
-        log(f"Updated {app_js_path} with static lists.")
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            self.log(f"Updated {index_path} with {formatted_total} repos.")
 
-    log("Restarting PM2 service...")
-    try:
-        subprocess.run(["pm2", "restart", PM2_APP_NAME], check=False, stdout=subprocess.DEVNULL)
-    except Exception as e:
-        log(f"Warning: PM2 restart failed (maybe not running): {e}")
-    log("Deployment complete.")
+        app_js_path = "static/app.js"
+        if os.path.exists(app_js_path):
+            with open(app_js_path, "r", encoding="utf-8") as f:
+                js_content = f.read()
+
+            static_data = {"languages": languages, "topics": topics}
+            injection_code1 = f"const STATIC_DATA = {json.dumps(static_data)};"
+
+            if "const STATIC_DATA =" in js_content:
+                js_content = re.sub(r"const STATIC_DATA = \{.*?\};", injection_code1, js_content, flags=re.DOTALL)
+
+            with open(app_js_path, "w", encoding="utf-8") as f:
+                f.write(js_content)
+            self.log(f"Updated {app_js_path} with static lists.")
+
+        self.log("Restarting PM2 service...")
+        try:
+            subprocess.run(["pm2", "restart", self.pm2_app_name], check=False, stdout=subprocess.DEVNULL)
+        except Exception as e:
+            self.log(f"Warning: PM2 restart failed (maybe not running): {e}")
+        self.log("Deployment complete.")
 
 
 def crawl():
@@ -285,4 +311,6 @@ def run_at_hours(func: Callable, hours_list: List[int]):
 
 
 if __name__ == "__main__":
-    run_at_hours(crawl, [0, 6, 12, 18])
+    # token could come from an environment variable in real deployments
+    crawler = Crawler(TOKEN)
+    crawler.run_at_hours([0, 6, 12, 18])
