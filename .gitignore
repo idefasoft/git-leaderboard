@@ -1,0 +1,5 @@
+github_repos.db
+github_repos.db-shm
+github_repos.db-wal
+__pycache__/
+venv/
