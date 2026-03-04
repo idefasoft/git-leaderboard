@@ -123,7 +123,6 @@ class GithubGraphQL:
 
         raise Exception("Max retries exceeded.")
 
-
 class Crawler:
     def __init__(
         self,
@@ -222,95 +221,30 @@ class Crawler:
         except Exception as e:
             self.log(f"Warning: PM2 restart failed (maybe not running): {e}")
         self.log("Deployment complete.")
-
-
-def crawl():
-    gh = GithubGraphQL(TOKEN)
-    db = RepoDB(DB_PATH)
-    current_min_stars = MIN_STARS
-    total_fetched = 0
-
-    log(f"Starting crawl for repos with >= {MIN_STARS} stars...")
-
-    while True:
-        search_query = f"stars:>={current_min_stars} sort:stars-asc"
-        log(f"Querying batch: '{search_query}'")
-
-        cursor = None
-        batch_repos = []
-        has_next_page = True
-
-        #  Max 1000 results allowed by GitHub
-        while has_next_page:
-            time.sleep(0.1)
-            data = gh.execute_query(search_query, cursor)
-            search_data = data["search"]
-
-            nodes = search_data["nodes"]
-            if not nodes:
-                break
-
-            batch_repos.extend(nodes)
-            total_fetched += len(nodes)
-
-            log(f"  Fetched {len(nodes)} items. Total: {total_fetched}. Last star count: {nodes[-1]['stargazerCount']}")
-
-            page_info = search_data["pageInfo"]
-            has_next_page = page_info["hasNextPage"]
-            cursor = page_info["endCursor"]
-
-            if len(batch_repos) >= 1000:
-                break
-
-        if not batch_repos:
-            log("No more results found.")
-            break
-
-        last_repo_stars = batch_repos[-1]["stargazerCount"]
-
-        if last_repo_stars == current_min_stars:
-            current_min_stars += 1
-        else:
-            current_min_stars = last_repo_stars
-        db.upsert_from_github_nodes(batch_repos)
-    db.close()
-    deploy_site(DB_PATH)
-
-
-def run_at_hours(func: Callable, hours_list: List[int]):
-    now = datetime.now(tz=timezone.utc)
-    current_h = now.hour
-
-    if current_h in hours_list:
-        minutes_remaining = 0
-    else:
-        sorted_hours = sorted(hours_list)
-        next_hour = next((h for h in sorted_hours if h > current_h), sorted_hours[0])
-
-        target = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
-        if next_hour <= current_h:
-            target += timedelta(days=1)
-
-        minutes_remaining = int((target - now).total_seconds() / 60)
-
-    log(f"Scheduler started for hours: {hours_list}")
-    log(f"Next crawl will start in approximately {minutes_remaining} minutes.")
-    last_run_hour = -1
-
-    while True:
-        current_hour = datetime.now(tz=timezone.utc).hour
-
-        if current_hour in hours_list and current_hour != last_run_hour:
-            func()
-            last_run_hour = current_hour
-
-        if current_hour not in hours_list:
-            last_run_hour = -1
-
-        time.sleep(30)
+        
+    def run_at_hours(self, hours: List[int]):
+        self.log(f"Starting crawler. Will run at hours: {hours}")
+        while True:
+            now = datetime.now()
+            if now.hour in hours:
+                self.log("Starting crawl cycle...")
+                try:
+                    self.crawl_and_update()
+                    self.deploy_site()
+                except Exception as e:
+                    self.log(f"Error during crawl/deploy: {e}")
+                self.log("Cycle complete. Sleeping for 1 hour.")
+                time.sleep(3600)
+            else:
+                next_run = min((h for h in hours if h > now.hour), default=hours[0] + 24)
+                next_run_time = now.replace(hour=next_run % 24, minute=0, second=0, microsecond=0)
+                if next_run_time <= now:
+                    next_run_time += timedelta(days=1)
+                sleep_seconds = (next_run_time - now).total_seconds()
+                self.log(f"Current hour {now.hour} not in target hours. Sleeping for {sleep_seconds/3600:.2f} hours until {next_run_time}.")
+                time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
-    # token could come from an environment variable in real deployments
     crawler = Crawler(TOKEN)
     crawler.run_at_hours([0, 6, 12, 18])

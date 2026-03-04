@@ -3,51 +3,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
-def iso_to_unix(ts: Optional[str]) -> Optional[int]:
-    if not ts:
-        return None
-    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    return int(dt.timestamp())
-
-
-def unix_to_iso(ts: Optional[int]) -> Optional[str]:
-    if ts is None:
-        return None
-    return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def chunks(seq: Sequence[Any], n: int) -> Iterable[Sequence[Any]]:
-    for i in range(0, len(seq), n):
-        yield seq[i : i + n]
-
-
-def row_to_obj(row: sqlite3.Row) -> Dict[str, Any]:
-    topics_concat = row["topicsConcat"]
-    topics = [] if topics_concat is None else str(topics_concat).split("\x1f")
-    topics = [t for t in topics if t]
-
-    res = {
-        "n": row["nameWithOwner"],
-        "g": None if row["globalRank"] is None else int(row["globalRank"]),
-        "s": int(row["stargazerCount"]),
-        "f": int(row["forkCount"]),
-        "w": int(row["watchersCount"]),
-        "d": None if row["diskUsage"] is None else int(row["diskUsage"]),
-        "a": row["description"],
-        "h": row["homepageUrl"],
-        "c": unix_to_iso(row["createdAtUnix"]),
-        # "u": unix_to_iso(row["updatedAtUnix"]),
-        "p": unix_to_iso(row["pushedAtUnix"]),
-        "i": bool(int(row["isArchived"])),
-        "l": row["primaryLanguage"],
-        "t": topics,
-        # "x": unix_to_iso(row["fetchedAtUnix"]),
-    }
-    if "newStars" in row.keys() and row["newStars"]:
-        res["ns"] = int(row["newStars"])
-    return res
-
-
 def select_latest_base_sql(include_global_rank: bool = True, extra_select: str = "") -> str:
     rank_select = "gr.globalRank     AS globalRank," if include_global_rank else "NULL            AS globalRank,"
     rank_join = (
@@ -105,6 +60,50 @@ def count_base_sql() -> str:
 
 
 class RepoDB:
+    @staticmethod
+    def iso_to_unix(ts: Optional[str]) -> Optional[int]:
+        if not ts:
+            return None
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return int(dt.timestamp())
+
+    @staticmethod
+    def unix_to_iso(ts: Optional[int]) -> Optional[str]:
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def chunks(seq: Sequence[Any], n: int) -> Iterable[Sequence[Any]]:
+        for i in range(0, len(seq), n):
+            yield seq[i : i + n]
+
+    @staticmethod
+    def row_to_obj(row: sqlite3.Row) -> Dict[str, Any]:
+        topics_concat = row["topicsConcat"]
+        topics = [] if topics_concat is None else str(topics_concat).split("\x1f")
+        topics = [t for t in topics if t]
+
+        res = {
+            "n": row["nameWithOwner"],
+            "g": None if row["globalRank"] is None else int(row["globalRank"]),
+            "s": int(row["stargazerCount"]),
+            "f": int(row["forkCount"]),
+            "w": int(row["watchersCount"]),
+            "d": None if row["diskUsage"] is None else int(row["diskUsage"]),
+            "a": row["description"],
+            "h": row["homepageUrl"],
+            "c": RepoDB.unix_to_iso(row["createdAtUnix"]),
+            # "u": RepoDB.unix_to_iso(row["updatedAtUnix"]),
+            "p": RepoDB.unix_to_iso(row["pushedAtUnix"]),
+            "i": bool(int(row["isArchived"])),
+            "l": row["primaryLanguage"],
+            "t": topics,
+            # "x": RepoDB.unix_to_iso(row["fetchedAtUnix"]),
+        }
+        if "newStars" in row.keys() and row["newStars"]:
+            res["ns"] = int(row["newStars"])
+        return res
     def __init__(self, path: str) -> None:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -252,7 +251,7 @@ class RepoDB:
         out: Dict[str, int] = {}
         if not names:
             return out
-        for chunk in chunks(names, 500):
+        for chunk in self.chunks(names, 500):
             q = "SELECT id, name_with_owner FROM repo WHERE name_with_owner IN ({})".format(",".join(["?"] * len(chunk)))
             for row in self.conn.execute(q, tuple(chunk)).fetchall():
                 out[str(row["name_with_owner"])] = int(row["id"])
@@ -262,7 +261,7 @@ class RepoDB:
         out: Dict[int, sqlite3.Row] = {}
         if not repo_ids:
             return out
-        for chunk in chunks(repo_ids, 500):
+        for chunk in self.chunks(repo_ids, 500):
             q = "SELECT repo_id, history_start_run_id, stars, forks, watchers, disk_usage FROM repo_latest WHERE repo_id IN ({})".format(",".join(["?"] * len(chunk)))
             for row in self.conn.execute(q, tuple(chunk)).fetchall():
                 out[int(row["repo_id"])] = row
@@ -301,7 +300,7 @@ class RepoDB:
             repo_id = int(n["databaseId"])
             name = n["nameWithOwner"]
             repo_ids.append(repo_id)
-            repo_rows.append((repo_id, name, iso_to_unix(n.get("createdAt")), n.get("description"), n.get("homepageUrl")))
+            repo_rows.append((repo_id, name, self.iso_to_unix(n.get("createdAt")), n.get("description"), n.get("homepageUrl")))
 
         with self.conn:
             conflict_params = [(row[1], row[0]) for row in repo_rows]
@@ -360,8 +359,8 @@ class RepoDB:
             disk_usage = n.get("diskUsage")
             disk_usage_i: Optional[int] = None if disk_usage is None else int(disk_usage)
 
-            updated_at = iso_to_unix(n.get("updatedAt"))
-            pushed_at = iso_to_unix(n.get("pushedAt"))
+            updated_at = self.iso_to_unix(n.get("updatedAt"))
+            pushed_at = self.iso_to_unix(n.get("pushedAt"))
             is_archived = 1 if bool(n.get("isArchived")) else 0
 
             pl_name = None
@@ -473,7 +472,7 @@ class RepoDB:
                 )
 
             if topic_repo_ids_to_refresh:
-                for chunk in chunks(topic_repo_ids_to_refresh, 500):
+                for chunk in self.chunks(topic_repo_ids_to_refresh, 500):
                     q = "DELETE FROM repo_topic_latest WHERE repo_id IN ({})".format(",".join(["?"] * len(chunk)))
                     self.conn.execute(q, tuple(chunk))
 
@@ -492,7 +491,7 @@ class RepoDB:
         """
         )
         row = self.conn.execute(q, (name_with_owner,)).fetchone()
-        return None if row is None else row_to_obj(row)
+        return None if row is None else self.row_to_obj(row)
 
     def _prepare_filter_conditions(
         self,
@@ -693,8 +692,8 @@ class RepoDB:
         for r in rows:
             out.append(
                 {
-                    "startFetchedAt": unix_to_iso(r["startFetchedAtUnix"]),
-                    "endFetchedAt": unix_to_iso(r["endFetchedAtUnix"]),
+                    "startFetchedAt": self.unix_to_iso(r["startFetchedAtUnix"]),
+                    "endFetchedAt": self.unix_to_iso(r["endFetchedAtUnix"]),
                     "s": int(r["stars"]),
                     "f": int(r["forks"]),
                     "w": int(r["watchers"]),
