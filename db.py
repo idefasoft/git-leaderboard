@@ -590,7 +590,7 @@ class RepoDB:
         all_params.extend([page_size, int(offset)])
 
         rows = self.conn.execute(sql, tuple(all_params)).fetchall()
-        return [row_to_obj(r) for r in rows]
+        return [self.row_to_obj(r) for r in rows]
 
     def leaderboard(
         self,
@@ -649,7 +649,7 @@ class RepoDB:
         params.extend([page_size, int(offset)])
 
         rows = self.conn.execute(sql, tuple(params)).fetchall()
-        return [row_to_obj(r) for r in rows]
+        return [self.row_to_obj(r) for r in rows]
 
     def get_global_rank(self, name_with_owner: str) -> Optional[int]:
         sql = """
