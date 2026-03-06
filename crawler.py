@@ -108,8 +108,11 @@ class GithubGraphQL:
                 if response.status_code == 200:
                     data = response.json()
                     if "errors" in data:
-                        log(f"GraphQL Errors: {data['errors']}")
-                        raise Exception("GraphQL returned errors")
+                        log(f"GraphQL Errors: {data['errors']}. Retrying...")
+                        time.sleep(10 * (attempts + 1))
+                        attempts += 1
+                        continue
+
                     return data["data"]
 
                 elif 500 <= response.status_code <= 504:

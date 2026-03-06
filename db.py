@@ -43,7 +43,7 @@ def row_to_obj(row: sqlite3.Row) -> Dict[str, Any]:
         "t": topics,
         # "x": unix_to_iso(row["fetchedAtUnix"]),
     }
-    if "newStars" in row.keys() and row["newStars"]:
+    if "newStars" in row.keys() and row["newStars"] is not None:
         res["ns"] = int(row["newStars"])
     return res
 
@@ -568,8 +568,7 @@ class RepoDB:
                         FROM repo_metrics_hist h
                         WHERE h.repo_id = rl.repo_id
                         AND h.start_run_id <= ?
-                        AND h.end_run_id   >= ?
-                        ORDER BY h.end_run_id ASC
+                        ORDER BY h.start_run_id DESC
                         LIMIT 1
                     ), rl.stars),
                     0
@@ -586,7 +585,7 @@ class RepoDB:
             """
         )
 
-        all_params: List[Any] = [base_run_id, base_run_id]
+        all_params: List[Any] = [base_run_id]
         all_params.extend(params)
         all_params.extend([page_size, int(offset)])
 
